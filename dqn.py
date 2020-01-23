@@ -25,6 +25,8 @@ flags.DEFINE_float("exploration_decay", 0.995, "Exploration rate")
 flags.DEFINE_integer("memory_size", 1000000, "Experience replay buffer size")
 flags.DEFINE_integer("batch_size", 20, "Batch size for training")
 flags.DEFINE_integer("episodes", 10, "Number of episodes to play")
+flags.DEFINE_integer("model_update", 10,
+                     "Number of episodes for each update of target model")
 
 flags.DEFINE_string("environment", "MiniGrid-Empty-8x8-v0",
                     "Environment to play in")
@@ -51,6 +53,8 @@ class Agent():
         self.model.compile(
             loss="mse", optimizer=tf.keras.optimizers.Adam(FLAGS.learning_rate))
 
+        self.target_model = tf.keras.models.clone_model(self.model)
+
         self.model.summary()
 
     def remember(self, state, action, reward, next_state, done):
@@ -58,7 +62,7 @@ class Agent():
         self.memory.append((state, action, reward, next_state, done))
 
     def q_values(self, state):
-        return self.model.predict(np.expand_dims(state, axis=0))[0]
+        return self.target_model.predict(np.expand_dims(state, axis=0))[0]
 
     def act(self, state):
         if np.random.rand() < self.exploration_rate:
@@ -67,6 +71,9 @@ class Agent():
         q_values = self.q_values(state)
 
         return np.argmax(q_values)
+
+    def update_target(self):
+        self.target_model = tf.keras.models.clone_model(self.model)
 
     def experience_replay(self):
         if len(self.memory) < FLAGS.batch_size:
@@ -83,9 +90,9 @@ class Agent():
 
         q_update[done] = rewards[done]
         q_update[~done] = rewards[~done] + FLAGS.gamma * \
-            np.amax(self.model.predict(next_states[~done]), axis=1)
+            np.amax(self.target_model.predict(next_states[~done]), axis=1)
 
-        q_values = self.model.predict(states)
+        q_values = self.target_model.predict(states)
         q_values[np.arange(len(q_values)), actions] = q_update
 
         self.model.fit(states, q_values, verbose=0)
@@ -107,10 +114,10 @@ def run_episode(env, agent, q_values_s0, q_values_sT):
         state_next, reward, done, info = env.step(action)
 
         if step == 1:
-            q_values_s0.append(agent.q_values(state))
+            q_values_s0.append(agent.q_values(state)[action])
 
         if reward > 0:
-            q_values_sT.append(agent.q_values(state))
+            q_values_sT.append(agent.q_values(state)[action])
 
         agent.remember(state, action, reward, state_next, done)
 
@@ -130,28 +137,29 @@ def results(scores, agent, q_values_s0, q_values_sT):
 
     FLAGS.append_flags_into_file(os.path.join(FLAGS.output_dir, "flags.txt"))
 
-    sns.heatmap(q_values_s0.T)
+    plt.plot(q_values_s0)
     plt.savefig(os.path.join(FLAGS.output_dir, "q_values_s0.png"))
     plt.figure()
 
-    sns.heatmap(q_values_sT.T)
+    plt.plot(q_values_sT)
     plt.savefig(os.path.join(FLAGS.output_dir, "q_values_sT.png"))
     plt.figure()
 
     plt.plot(np.cumsum(scores) / np.arange(1, len(scores) + 1))
     plt.savefig(os.path.join(FLAGS.output_dir, "score_means.png"))
-
     plt.figure()
+
     plt.plot(scores)
     plt.savefig(os.path.join(FLAGS.output_dir, "scores.png"))
-
     plt.figure()
+
     plt.plot(agent.reward_logs.temp_means)
     plt.savefig(os.path.join(FLAGS.output_dir, "reward-means.png"))
-
     plt.figure()
+
     plt.plot(agent.reward_update_logs.batch_means)
     plt.savefig(os.path.join(FLAGS.output_dir, "update-means.png"))
+    plt.figure()
 
     with open("results.txt", "w") as f:
         print("Distribution of all rewards recorded: {}".format(
@@ -175,12 +183,15 @@ def main(argv):
     q_values_s0 = []
     q_values_sT = []
 
-    for run in range(FLAGS.episodes):
+    for run in range(1, FLAGS.episodes + 1):
         steps, score = run_episode(env, agent, q_values_s0, q_values_sT)
 
         scores.append(score)
 
         agent.experience_replay()
+
+        if run % FLAGS.model_update:
+            agent.update_target()
 
         print("Run {}: exploration {:.2f}, memory size {}, steps {}, reward {:0.2f}, mean {:0.2f}".format(
             run, agent.exploration_rate, len(agent.memory), steps, score, np.mean(scores)))
