@@ -1,4 +1,6 @@
 from gym_minigrid.wrappers import *
+from utils import *
+
 import random
 import seaborn as sns
 import numpy as np
@@ -33,7 +35,8 @@ flags.DEFINE_integer("steps_decay", 10000,
 flags.DEFINE_string("environment", "MiniGrid-Empty-8x8-v0",
                     "Environment to play in")
 flags.DEFINE_string("output_dir", None, "Where to write files produced")
-flags.DEFINE_string("model_dir", None, "Directory from which to load an initial model and weights")
+flags.DEFINE_string(
+    "model_dir", None, "Directory from which to load an initial model and weights")
 
 
 class Agent():
@@ -125,6 +128,7 @@ class Agent():
 
         self.model.fit(states, q_values, verbose=0)
 
+
 def run_episode(env, agent, q_values_s0, q_values_sT, mse):
     state = env.reset()
 
@@ -160,9 +164,10 @@ def main(argv):
     print(tf.test.is_gpu_available())
 
     env = gym.make(FLAGS.environment)
-    env = OneHotPartialObsWrapper(env)
+    env = ImgOneHotPartialObsWrapper(env)
 
-    agent = Agent(env.observation_space.shape, env.action_space.n, from_dir=FLAGS.model_dir)
+    agent = Agent(env.observation_space.shape,
+                  env.action_space.n, from_dir=FLAGS.model_dir)
 
     scores = []
 
